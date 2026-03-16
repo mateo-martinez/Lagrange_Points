@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Orbital Mechanics Lab</title>
+
+<style>
+body{
+margin:0;
+background:#050510;
+color:white;
+font-family:Arial;
+overflow:hidden;
+}
+
+#panel{
+position:absolute;
+top:10px;
+left:10px;
+background:rgba(0,0,0,.7);
+padding:12px;
+border-radius:10px;
+}
+
+button,select,input{
+margin:4px;
+}
+</style>
+
+</head>
+
+<body>
+
+<div id="panel">
+
+<b>Orbital Mechanics Lab</b><br><br>
+
+System
+<select id="system">
+<option value="earthmoon">Earth – Moon</option>
+<option value="sunearth">Sun – Earth</option>
+</select>
+
+<br>
+
+Simulation speed
+<input id="speed" type="range" min="0.1" max="5" step="0.1" value="1">
+
+<br>
+
+<button onclick="spawnProbe()">Add spacecraft</button>
+<button onclick="clearProbes()">Clear</button>
+
+<br>
+
+<label>
+<input type="checkbox" id="showPotential" checked>
+Show potential field
+</label>
+
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+
+const canvas=document.getElementById("canvas")
+const ctx=canvas.getContext("2d")
+
+canvas.width=window.innerWidth
+canvas.height=window.innerHeight
+
+let cx=canvas.width/2
+let cy=canvas.height/2
+
+let probes=[]
+let trails=[]
+
+const systems={
+
+earthmoon:{
+m1:5.972e24,
+m2:7.348e22,
+scale:260,
+name1:"Earth",
+name2:"Moon",
+color1:"#3fa9ff",
+color2:"#bbbbbb"
+},
+
+sunearth:{
+m1:1.989e30,
+m2:5.972e24,
+scale:260,
+name1:"Sun",
+name2:"Earth",
+color1:"#ffaa00",
+color2:"#3fa9ff"
+}
+
+}
+
+function system(){
+return systems[document.getElementById("system").value]
+}
+
+function mu(){
+let s=system()
+return s.m2/(s.m1+s.m2)
+}
+
+function computeLagrange(mu){
+
+let L1=1-Math.cbrt(mu/3)
+let L2=1+Math.cbrt(mu/3)
+let L3=-1-(5*mu/12)
+
+return{
+
+L1:{x:L1,y:0},
+L2:{x:L2,y:0},
+L3:{x:L3,y:0},
+
+L4:{
+x:0.5-mu,
+y:Math.sqrt(3)/2
+},
+
+L5:{
+x:0.5-mu,
+y:-Math.sqrt(3)/2
+}
+
+}
+
+}
+
+function rot(x,y){
+
+let scale=system().scale
+
+return{
+
+x:cx+x*scale,
+y:cy+y*scale
+
+}
+
+}
+
+function spawnProbe(){
+
+probes.push({
+
+x:Math.random()*0.4+0.2,
+y:(Math.random()-0.5)*0.4,
+vx:0,
+vy:0
+
+})
+
+trails.push([])
+
+}
+
+function clearProbes(){
+probes=[]
+trails=[]
+}
+
+function updateProbes(){
+
+let m=mu()
+
+for(let i=0;i<probes.length;i++){
+
+let p=probes[i]
+
+let dx1=p.x+m
+let dy1=p.y
+
+let dx2=p.x-(1-m)
+let dy2=p.y
+
+let r1=Math.sqrt(dx1*dx1+dy1*dy1)
+let r2=Math.sqrt(dx2*dx2+dy2*dy2)
+
+let ax=p.x+2*p.vy-(1-m)*dx1/(r1*r1*r1)-m*dx2/(r2*r2*r2)
+let ay=p.y-2*p.vx-(1-m)*dy1/(r1*r1*r1)-m*dy2/(r2*r2*r2)
+
+let dt=0.003*document.getElementById("speed").value
+
+p.vx+=ax*dt
+p.vy+=ay*dt
+
+p.x+=p.vx
+p.y+=p.vy
+
+trails[i].push({x:p.x,y:p.y})
+
+if(trails[i].length>400)
+trails[i].shift()
+
+}
+
+}
+
+function drawPotential(){
+
+if(!document.getElementById("showPotential").checked)
+return
+
+let m=mu()
+
+let step=25
+
+for(let x=0;x<canvas.width;x+=step){
+
+for(let y=0;y<canvas.height;y+=step){
+
+let nx=(x-cx)/system().scale
+let ny=(y-cy)/system().scale
+
+let r1=Math.sqrt((nx+m)**2+ny**2)
+let r2=Math.sqrt((nx-(1-m))**2+ny**2)
+
+let U=0.5*(nx*nx+ny*ny)+(1-m)/r1+m/r2
+
+let brightness=Math.min(255, U*40)
+
+ctx.fillStyle="rgba(0,120,255,"+(brightness/400)+")"
+ctx.fillRect(x,y,step,step)
+
+}
+
+}
+
+}
+
+function drawBodies(){
+
+let m=mu()
+
+let s=system()
+
+let b1=rot(-m,0)
+let b2=rot(1-m,0)
+
+ctx.beginPath()
+ctx.arc(b1.x,b1.y,18,0,Math.PI*2)
+ctx.fillStyle=s.color1
+ctx.fill()
+
+ctx.beginPath()
+ctx.arc(b2.x,b2.y,8,0,Math.PI*2)
+ctx.fillStyle=s.color2
+ctx.fill()
+
+ctx.fillText(s.name1,b1.x+20,b1.y)
+ctx.fillText(s.name2,b2.x+10,b2.y)
+
+}
+
+function drawLagrange(){
+
+let lag=computeLagrange(mu())
+
+for(let key in lag){
+
+let p=rot(lag[key].x,lag[key].y)
+
+ctx.beginPath()
+ctx.arc(p.x,p.y,5,0,Math.PI*2)
+ctx.fillStyle="red"
+ctx.fill()
+
+ctx.fillText(key,p.x+8,p.y)
+
+}
+
+}
+
+function drawProbes(){
+
+for(let i=0;i<probes.length;i++){
+
+let trail=trails[i]
+
+ctx.beginPath()
+
+for(let j=0;j<trail.length;j++){
+
+let p=rot(trail[j].x,trail[j].y)
+
+if(j==0) ctx.moveTo(p.x,p.y)
+else ctx.lineTo(p.x,p.y)
+
+}
+
+ctx.strokeStyle="#00ffcc"
+ctx.stroke()
+
+let pr=rot(probes[i].x,probes[i].y)
+
+ctx.beginPath()
+ctx.arc(pr.x,pr.y,3,0,Math.PI*2)
+ctx.fillStyle="#00ffcc"
+ctx.fill()
+
+}
+
+}
+
+function frame(){
+
+requestAnimationFrame(frame)
+
+ctx.clearRect(0,0,canvas.width,canvas.height)
+
+drawPotential()
+
+drawBodies()
+
+drawLagrange()
+
+updateProbes()
+
+drawProbes()
+
+}
+
+frame()
+
+</script>
+
+</body>
+</html>
