@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Orbital Mechanics Visualizer</title>
+
+<style>
+
+body{
+margin:0;
+background:#050510;
+color:white;
+font-family:Arial;
+overflow:hidden;
+}
+
+#panel{
+position:absolute;
+top:10px;
+left:10px;
+background:rgba(0,0,0,.6);
+padding:12px;
+border-radius:10px;
+}
+
+button,select,input{
+margin:4px;
+}
+
+</style>
+</head>
+
+<body>
+
+<div id="panel">
+
+<b>Orbital Mechanics Visualizer</b>
+<br><br>
+
+System:
+<select id="system">
+<option value="earthmoon">Earth – Moon</option>
+<option value="sunearth">Sun – Earth</option>
+</select>
+
+<br>
+
+Speed
+<input type="range" id="speed" min="0" max="5" step="0.1" value="1">
+
+<br>
+
+<button onclick="addProbe()">Add spacecraft</button>
+
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+
+const canvas=document.getElementById("canvas")
+const ctx=canvas.getContext("2d")
+
+canvas.width=window.innerWidth
+canvas.height=window.innerHeight
+
+const cx=canvas.width/2
+const cy=canvas.height/2
+
+let t=0
+let probes=[]
+
+const systems={
+
+earthmoon:{
+m1:5.972e24,
+m2:7.348e22,
+distance:384400,
+scale:230,
+color1:"#3fa9ff",
+color2:"#bbb",
+name1:"Earth",
+name2:"Moon"
+},
+
+sunearth:{
+m1:1.989e30,
+m2:5.972e24,
+distance:150e6,
+scale:260,
+color1:"#ffaa00",
+color2:"#3fa9ff",
+name1:"Sun",
+name2:"Earth"
+}
+
+}
+
+function currentSystem(){
+return systems[document.getElementById("system").value]
+}
+
+function computeLagrange(mu){
+
+let r1=1-Math.cbrt(mu/3)
+let r2=1+Math.cbrt(mu/3)
+let r3=-1-5*mu/12
+
+return{
+
+L1:{x:r1,y:0},
+L2:{x:r2,y:0},
+L3:{x:r3,y:0},
+
+L4:{
+x:0.5-mu,
+y:Math.sqrt(3)/2
+},
+
+L5:{
+x:0.5-mu,
+y:-Math.sqrt(3)/2
+}
+
+}
+
+}
+
+function drawBody(x,y,r,color){
+
+ctx.beginPath()
+ctx.arc(x,y,r,0,Math.PI*2)
+ctx.fillStyle=color
+ctx.fill()
+
+}
+
+function drawPoint(x,y,label){
+
+ctx.beginPath()
+ctx.arc(x,y,5,0,Math.PI*2)
+ctx.fillStyle="red"
+ctx.fill()
+
+ctx.fillStyle="white"
+ctx.fillText(label,x+8,y)
+
+}
+
+function addProbe(){
+
+probes.push({
+x:Math.random()*0.4+0.2,
+y:(Math.random()-0.5)*0.3,
+vx:0,
+vy:0
+})
+
+}
+
+function updateProbes(mu){
+
+for(let p of probes){
+
+let dx1=p.x+mu
+let dy1=p.y
+
+let dx2=p.x-(1-mu)
+let dy2=p.y
+
+let r1=Math.sqrt(dx1*dx1+dy1*dy1)
+let r2=Math.sqrt(dx2*dx2+dy2*dy2)
+
+let ax=p.x+2*p.vy-(1-mu)*dx1/(r1*r1*r1)-mu*dx2/(r2*r2*r2)
+let ay=p.y-2*p.vx-(1-mu)*dy1/(r1*r1*r1)-mu*dy2/(r2*r2*r2)
+
+p.vx+=ax*0.002
+p.vy+=ay*0.002
+
+p.x+=p.vx
+p.y+=p.vy
+
+}
+
+}
+
+function draw(){
+
+requestAnimationFrame(draw)
+
+ctx.clearRect(0,0,canvas.width,canvas.height)
+
+const sys=currentSystem()
+
+let mu=sys.m2/(sys.m1+sys.m2)
+
+let lag=computeLagrange(mu)
+
+let scale=sys.scale
+
+let speed=document.getElementById("speed").value
+
+t+=0.01*speed
+
+let angle=t
+
+function rot(x,y){
+
+return{
+
+x:cx+scale*(x*Math.cos(angle)-y*Math.sin(angle)),
+y:cy+scale*(x*Math.sin(angle)+y*Math.cos(angle))
+
+}
+
+}
+
+let body1=rot(-mu,0)
+let body2=rot(1-mu,0)
+
+drawBody(body1.x,body1.y,18,sys.color1)
+drawBody(body2.x,body2.y,8,sys.color2)
+
+ctx.fillText(sys.name1,body1.x+20,body1.y)
+ctx.fillText(sys.name2,body2.x+10,body2.y)
+
+for(let key in lag){
+
+let p=rot(lag[key].x,lag[key].y)
+
+drawPoint(p.x,p.y,key)
+
+}
+
+updateProbes(mu)
+
+for(let p of probes){
+
+let pr=rot(p.x,p.y)
+
+ctx.beginPath()
+ctx.arc(pr.x,pr.y,3,0,Math.PI*2)
+ctx.fillStyle="#00ffcc"
+ctx.fill()
+
+}
+
+}
+
+draw()
+
+</script>
+
+</body>
+</html>
