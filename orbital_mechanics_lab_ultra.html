@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Orbital Mechanics Lab Ultra</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<style>
+
+body{
+margin:0;
+background:radial-gradient(circle at center,#050510,#000);
+font-family:Orbitron,Arial;
+color:#0ff;
+overflow:hidden;
+}
+
+#ui{
+
+position:absolute;
+top:15px;
+left:15px;
+
+width:260px;
+
+background:rgba(0,20,40,.75);
+border:1px solid #00ffff55;
+border-radius:12px;
+
+padding:14px;
+
+box-shadow:
+0 0 10px #00ffff44,
+inset 0 0 10px #00ffff22;
+
+}
+
+h2{
+margin:0;
+font-size:16px;
+color:#00ffff;
+}
+
+button,select,input{
+
+width:100%;
+margin-top:6px;
+
+background:#001c2e;
+border:1px solid #00ffff44;
+color:#00ffff;
+
+padding:6px;
+border-radius:6px;
+
+}
+
+button:hover{
+background:#003b5e;
+cursor:pointer;
+}
+
+#info{
+margin-top:8px;
+font-size:12px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div id="ui">
+
+<h2>Orbital Mechanics Lab</h2>
+
+System
+
+<select id="system">
+<option value="earthmoon">Earth – Moon</option>
+<option value="sunearth">Sun – Earth</option>
+</select>
+
+Simulation Speed
+
+<input id="speed" type="range" min="0.1" max="5" step="0.1" value="1">
+
+<button onclick="spawnProbe()">Spawn Spacecraft</button>
+<button onclick="spawnHalo()">Halo Orbit</button>
+<button onclick="spawnTrojans()">Trojan Swarm</button>
+<button onclick="clearObjects()">Clear Objects</button>
+
+<div id="info">
+
+Jacobi Constant  
+<div id="jacobi">--</div>
+
+Objects  
+<div id="count">0</div>
+
+</div>
+
+</div>
+
+<script>
+
+let scene=new THREE.Scene()
+
+let camera=new THREE.PerspectiveCamera(
+60,
+window.innerWidth/window.innerHeight,
+0.1,
+10000
+)
+
+let renderer=new THREE.WebGLRenderer({antialias:true})
+
+renderer.setSize(window.innerWidth,window.innerHeight)
+
+document.body.appendChild(renderer.domElement)
+
+camera.position.z=8
+
+const light=new THREE.PointLight(0xffffff,1)
+
+scene.add(light)
+
+const earthGeom=new THREE.SphereGeometry(.5,32,32)
+const moonGeom=new THREE.SphereGeometry(.2,32,32)
+
+const earthMat=new THREE.MeshBasicMaterial({color:0x3fa9ff})
+const moonMat=new THREE.MeshBasicMaterial({color:0xbbbbbb})
+
+let earth=new THREE.Mesh(earthGeom,earthMat)
+let moon=new THREE.Mesh(moonGeom,moonMat)
+
+scene.add(earth)
+scene.add(moon)
+
+let probes=[]
+
+let trails=[]
+
+function mu(){
+return .0123
+}
+
+function spawnProbe(){
+
+let geo=new THREE.SphereGeometry(.05,16,16)
+let mat=new THREE.MeshBasicMaterial({color:0x00ffff})
+
+let p=new THREE.Mesh(geo,mat)
+
+p.userData={
+
+x:Math.random()*1.5,
+y:(Math.random()-.5)*1.2,
+vx:0,
+vy:0
+
+}
+
+scene.add(p)
+
+probes.push(p)
+
+}
+
+function spawnHalo(){
+
+let geo=new THREE.SphereGeometry(.05,16,16)
+let mat=new THREE.MeshBasicMaterial({color:0xff00ff})
+
+let p=new THREE.Mesh(geo,mat)
+
+p.userData={
+
+x:1.2,
+y:0,
+vx:0,
+vy:.25
+
+}
+
+scene.add(p)
+
+probes.push(p)
+
+}
+
+function spawnTrojans(){
+
+for(let i=0;i<25;i++){
+
+let geo=new THREE.SphereGeometry(.04,10,10)
+let mat=new THREE.MeshBasicMaterial({color:0xffff00})
+
+let p=new THREE.Mesh(geo,mat)
+
+p.userData={
+
+x:.5+(Math.random()-.5)*.1,
+y:.86+(Math.random()-.5)*.1,
+vx:0,
+vy:0
+
+}
+
+scene.add(p)
+
+probes.push(p)
+
+}
+
+}
+
+function clearObjects(){
+
+for(let p of probes)
+scene.remove(p)
+
+probes=[]
+
+}
+
+function updateProbes(){
+
+let m=mu()
+
+for(let p of probes){
+
+let d1x=p.userData.x+m
+let d1y=p.userData.y
+
+let d2x=p.userData.x-(1-m)
+let d2y=p.userData.y
+
+let r1=Math.sqrt(d1x*d1x+d1y*d1y)
+let r2=Math.sqrt(d2x*d2x+d2y*d2y)
+
+let ax=p.userData.x+2*p.userData.vy
+-(1-m)*d1x/(r1*r1*r1)
+-m*d2x/(r2*r2*r2)
+
+let ay=p.userData.y-2*p.userData.vx
+-(1-m)*d1y/(r1*r1*r1)
+-m*d2y/(r2*r2*r2)
+
+let dt=.01*document.getElementById("speed").value
+
+p.userData.vx+=ax*dt
+p.userData.vy+=ay*dt
+
+p.userData.x+=p.userData.vx
+p.userData.y+=p.userData.vy
+
+p.position.x=p.userData.x
+p.position.y=p.userData.y
+
+let C=2*((1-m)/r1+m/r2)
++p.userData.x*p.userData.x
++p.userData.y*p.userData.y
+-(p.userData.vx*p.userData.vx+p.userData.vy*p.userData.vy)
+
+document.getElementById("jacobi").innerText=C.toFixed(3)
+
+}
+
+document.getElementById("count").innerText=probes.length
+
+}
+
+function animate(){
+
+requestAnimationFrame(animate)
+
+moon.position.x=1
+
+updateProbes()
+
+renderer.render(scene,camera)
+
+}
+
+animate()
+
+</script>
+
+</body>
+</html>
