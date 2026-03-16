@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Astrodynamics Workstation</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/OrbitControls.js"></script>
+
+<style>
+
+body{
+margin:0;
+background:#03030a;
+font-family:Arial;
+color:#00ffff;
+overflow:hidden;
+}
+
+#ui{
+
+position:absolute;
+top:15px;
+left:15px;
+
+width:270px;
+
+background:rgba(0,20,40,.8);
+border:1px solid #00ffff55;
+border-radius:12px;
+
+padding:14px;
+
+box-shadow:
+0 0 10px #00ffff44,
+inset 0 0 10px #00ffff22;
+
+}
+
+button,select,input{
+
+width:100%;
+margin-top:6px;
+
+background:#001c2e;
+border:1px solid #00ffff44;
+color:#00ffff;
+
+padding:6px;
+border-radius:6px;
+
+}
+
+button:hover{
+background:#003b5e;
+cursor:pointer;
+}
+
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+
+<b>Astrodynamics Lab</b>
+
+System
+
+<select id="system">
+<option value="earthmoon">Earth–Moon</option>
+<option value="sunearth">Sun–Earth</option>
+</select>
+
+Speed
+<input type="range" id="speed" min="0.1" max="5" step="0.1" value="1">
+
+<button onclick="spawnProbe()">Spawn spacecraft</button>
+<button onclick="spawnHalo()">Halo orbit</button>
+<button onclick="spawnTrojan()">Trojan swarm</button>
+<button onclick="clearObjects()">Clear objects</button>
+
+Jacobi
+<div id="jacobi">--</div>
+
+Objects
+<div id="count">0</div>
+
+</div>
+
+<script>
+
+let scene=new THREE.Scene()
+
+let camera=new THREE.PerspectiveCamera(
+60,
+window.innerWidth/window.innerHeight,
+0.1,
+10000
+)
+
+camera.position.z=6
+
+let renderer=new THREE.WebGLRenderer({antialias:true})
+
+renderer.setSize(window.innerWidth,window.innerHeight)
+
+document.body.appendChild(renderer.domElement)
+
+let controls=new THREE.OrbitControls(camera,renderer.domElement)
+
+controls.enablePan=true
+controls.enableZoom=true
+
+let light=new THREE.PointLight(0xffffff,1)
+
+scene.add(light)
+
+let probes=[]
+let trails=[]
+
+const systems={
+
+earthmoon:{
+m1:5.972e24,
+m2:7.348e22,
+color1:0x3fa9ff,
+color2:0xbbbbbb,
+name1:"Earth",
+name2:"Moon"
+},
+
+sunearth:{
+m1:1.989e30,
+m2:5.972e24,
+color1:0xffaa00,
+color2:0x3fa9ff,
+name1:"Sun",
+name2:"Earth"
+}
+
+}
+
+let body1,body2
+
+function initBodies(){
+
+if(body1) scene.remove(body1)
+if(body2) scene.remove(body2)
+
+let sys=systems[document.getElementById("system").value]
+
+body1=new THREE.Mesh(
+new THREE.SphereGeometry(.4,32,32),
+new THREE.MeshBasicMaterial({color:sys.color1})
+)
+
+body2=new THREE.Mesh(
+new THREE.SphereGeometry(.15,32,32),
+new THREE.MeshBasicMaterial({color:sys.color2})
+)
+
+body1.position.x=-0.01
+body2.position.x=1
+
+scene.add(body1)
+scene.add(body2)
+
+drawLagrange()
+
+}
+
+function mu(){
+
+let sys=systems[document.getElementById("system").value]
+
+return sys.m2/(sys.m1+sys.m2)
+
+}
+
+function drawLagrange(){
+
+let m=mu()
+
+let points=[
+
+{ x:1-Math.cbrt(m/3), y:0 },
+{ x:1+Math.cbrt(m/3), y:0 },
+{ x:-1-(5*m/12), y:0 },
+{ x:0.5-m, y:Math.sqrt(3)/2 },
+{ x:0.5-m, y:-Math.sqrt(3)/2 }
+
+]
+
+points.forEach(p=>{
+
+let dot=new THREE.Mesh(
+
+new THREE.SphereGeometry(.05,16,16),
+
+new THREE.MeshBasicMaterial({color:0xff0000})
+
+)
+
+dot.position.set(p.x,p.y,0)
+
+scene.add(dot)
+
+})
+
+}
+
+function spawnProbe(){
+
+let probe=new THREE.Mesh(
+
+new THREE.SphereGeometry(.04,12,12),
+
+new THREE.MeshBasicMaterial({color:0x00ffff})
+
+)
+
+probe.userData={
+
+x:Math.random()*1.5,
+y:(Math.random()-.5)*1.2,
+vx:0,
+vy:0
+
+}
+
+scene.add(probe)
+
+probes.push(probe)
+
+trails.push([])
+
+}
+
+function spawnHalo(){
+
+let probe=new THREE.Mesh(
+
+new THREE.SphereGeometry(.04,12,12),
+
+new THREE.MeshBasicMaterial({color:0xff00ff})
+
+)
+
+probe.userData={
+
+x:1.2,
+y:0,
+vx:0,
+vy:.25
+
+}
+
+scene.add(probe)
+
+probes.push(probe)
+
+trails.push([])
+
+}
+
+function spawnTrojan(){
+
+for(let i=0;i<25;i++){
+
+let probe=new THREE.Mesh(
+
+new THREE.SphereGeometry(.03,10,10),
+
+new THREE.MeshBasicMaterial({color:0xffff00})
+
+)
+
+probe.userData={
+
+x:.5+(Math.random()-.5)*.1,
+y:.86+(Math.random()-.5)*.1,
+vx:0,
+vy:0
+
+}
+
+scene.add(probe)
+
+probes.push(probe)
+
+trails.push([])
+
+}
+
+}
+
+function clearObjects(){
+
+probes.forEach(p=>scene.remove(p))
+
+probes=[]
+trails=[]
+
+}
+
+function updatePhysics(){
+
+let m=mu()
+
+for(let i=0;i<probes.length;i++){
+
+let p=probes[i]
+
+let d1x=p.userData.x+m
+let d1y=p.userData.y
+
+let d2x=p.userData.x-(1-m)
+let d2y=p.userData.y
+
+let r1=Math.sqrt(d1x*d1x+d1y*d1y)
+let r2=Math.sqrt(d2x*d2x+d2y*d2y)
+
+let ax=p.userData.x+2*p.userData.vy
+-(1-m)*d1x/(r1*r1*r1)
+-m*d2x/(r2*r2*r2)
+
+let ay=p.userData.y-2*p.userData.vx
+-(1-m)*d1y/(r1*r1*r1)
+-m*d2y/(r2*r2*r2)
+
+let dt=.01*document.getElementById("speed").value
+
+p.userData.vx+=ax*dt
+p.userData.vy+=ay*dt
+
+p.userData.x+=p.userData.vx
+p.userData.y+=p.userData.vy
+
+p.position.x=p.userData.x
+p.position.y=p.userData.y
+
+trails[i].push(new THREE.Vector3(p.position.x,p.position.y,0))
+
+if(trails[i].length>200)
+trails[i].shift()
+
+drawTrail(trails[i])
+
+let C=2*((1-m)/r1+m/r2)
++p.userData.x*p.userData.x
++p.userData.y*p.userData.y
+-(p.userData.vx*p.userData.vx+p.userData.vy*p.userData.vy)
+
+document.getElementById("jacobi").innerText=C.toFixed(3)
+
+}
+
+document.getElementById("count").innerText=probes.length
+
+}
+
+function drawTrail(points){
+
+let geometry=new THREE.BufferGeometry().setFromPoints(points)
+
+let material=new THREE.LineDashedMaterial({
+
+color:0x00ffff,
+dashSize:.05,
+gapSize:.05
+
+})
+
+let line=new THREE.Line(geometry,material)
+
+line.computeLineDistances()
+
+scene.add(line)
+
+}
+
+function animate(){
+
+requestAnimationFrame(animate)
+
+updatePhysics()
+
+renderer.render(scene,camera)
+
+}
+
+initBodies()
+
+animate()
+
+</script>
+
+</body>
+</html>
