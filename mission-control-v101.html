@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>AEROSPACE CORE v18.0 - MISSION SPECIALIST</title>
+    <style>
+        :root { --neon: #00f2ff; --bg: #000810; --safe: #00ff88; --warn: #ffcc00; --danger: #ff3333; --panel-bg: rgba(0,12,24,0.97); }
+        body, html { margin:0; padding:0; width:100%; height:100%; background:var(--bg); color:var(--neon); font-family: 'JetBrains Mono', 'Courier New', monospace; overflow:hidden; }
+        #hud { position:absolute; inset:0; pointer-events:none; z-index:100; padding:15px; display:grid; grid-template-columns: 360px 1fr 360px; grid-template-rows: 1fr 300px; gap:15px; }
+        .panel { pointer-events:auto; background:var(--panel-bg); border:1px solid #1a3a4a; padding:14px; border-top: 4px solid var(--neon); box-shadow: 0 4px 30px rgba(0,0,0,0.5); }
+        .header { font-size:11px; color:#5a8a9a; margin-bottom:12px; border-bottom:1px solid #1a3a4a; font-weight:bold; text-transform:uppercase; letter-spacing:1.5px; display:flex; justify-content:space-between; }
+        .stat { display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; border-bottom: 1px hideen rgba(255,255,255,0.05); }
+        .val { color:#fff; font-weight:bold; }
+        #terminal { background:#000; border:1px solid #1a3a4a; padding:12px; font-size:10px; color:var(--safe); overflow-y:auto; height:200px; line-height:1.6; }
+        .log-entry { margin-bottom: 5px; border-left: 2px solid #1a3a4a; padding-left: 10px; }
+        button { width:100%; padding:14px; background:rgba(0,30,60,0.6); color:var(--neon); border:1px solid var(--neon); cursor:pointer; font-weight:bold; margin-top:10px; text-transform:uppercase; transition: 0.3s; }
+        button:hover:not(:disabled) { background:var(--neon); color:#000; box-shadow: 0 0 20px var(--neon); }
+        button:disabled { border-color:#222; color:#444; background:transparent; cursor:not-allowed; }
+        input[type=range] { width: 100%; accent-color: var(--neon); margin-top:10px; }
+        .lagrange-label { position: absolute; color: var(--danger); font-size: 10px; font-weight: bold; pointer-events: none; text-shadow: 1px 1px 2px #000; }
+    </style>
+</head>
+<body>
+<div id="container"></div>
+<div id="labels-container" style="position:absolute; inset:0; pointer-events:none; z-index:50;">
+    <div id="L1-label" class="lagrange-label">L1</div>
+    <div id="L2-label" class="lagrange-label">L2</div>
+    <div id="L3-label" class="lagrange-label">L3</div>
+    <div id="L4-label" class="lagrange-label">L4</div>
+    <div id="L5-label" class="lagrange-label">L5</div>
+</div>
+
+<div id="hud">
+    <div class="panel">
+        <div class="header">FLIGHT CONTROL <span>V18.0</span></div>
+        <div id="countdown-ui" style="font-size:36px; text-align:center; color:var(--danger); font-weight:900;">READY</div>
+        <button id="btn-launch">Execute Launch</button>
+        <button id="btn-sep" disabled>Booster Sep</button>
+        <button id="btn-panels" disabled>Deploy Solar</button>
+        <button id="btn-tli" disabled>Ignite TLI</button>
+        <div style="margin-top:25px;" class="header">WARP CONTROL</div>
+        <input type="range" min="1" max="2500" value="1" id="warp-slider">
+        <div style="text-align:center; font-size:11px; margin-top:8px;">TIME SCALE: <span id="warp-val" style="color:#fff">1x</span></div>
+    </div>
+    <div></div>
+    <div class="panel">
+        <div class="header">PRIMARY TELEMETRY</div>
+        <div class="stat"><span>ALT (EARTH)</span><span id="alt-val" class="val">---</span></div>
+        <div class="stat"><span>ALT (MOON)</span><span id="alt-moon" class="val" style="color:var(--warn);">---</span></div>
+        <div class="stat"><span>VELOCITY</span><span id="vel-val" class="val">---</span></div>
+        <div class="stat"><span>FUEL MASS</span><span id="fuel-val" class="val">100%</span></div>
+        <div class="header" style="margin-top:20px;">SYSTEM HEALTH</div>
+        <div class="stat"><span>CPU LOAD</span><span id="cpu-val" class="val">12%</span></div>
+        <div class="stat"><span>V_DELTA_V</span><span id="dv-val" class="val">0.0 km/s</span></div>
+        <div class="stat"><span>PHASE ANG</span><span id="phase-val" class="val">0.0°</span></div>
+        <div id="status-val" style="text-align:center; font-weight:bold; font-size:16px; color:var(--neon); margin-top:15px; border:1px solid var(--neon); padding:5px;">PRE-IGNITION</div>
+    </div>
+    <div style="grid-column: 1 / 4;">
+        <div class="panel">
+            <div class="header">MISSION DATA RECORDER (FULL VERBOSE)</div>
+            <div id="terminal"></div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+    const R_E = 6371, GM_E = 398600, DIST_M = 384400, GM_M = 4902, R_M = 1737, SCALE = 1/15000;
+    let time = 0, warp = 1, state = 'GROUND', fuel = 100, dv_spent = 0;
+    let s = { x: R_E*SCALE, y: 0, z: 0, vx: 0, vy: 0, vz: 0 };
+    let b = { x: 0, y: 0, z: 0, vx: 0, active: false };
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 4000000);
+    camera.position.set(6, 6, 6);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('container').appendChild(renderer.domElement);
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+    const earth = new THREE.Mesh(new THREE.SphereGeometry(R_E*SCALE, 64, 64), new THREE.MeshPhongMaterial({
+        map: new THREE.TextureLoader().load('https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg')
+    }));
+    scene.add(earth);
+
+    const moon = new THREE.Mesh(new THREE.SphereGeometry(R_M*SCALE, 48, 48), new THREE.MeshPhongMaterial({
+        map: new THREE.TextureLoader().load('https://threejs.org/examples/textures/planets/moon_1024.jpg'),
+        color: 0xeeeeee
+    }));
+    scene.add(moon);
+
+    // Lagrange markers
+    const lpMeshes = [];
+    for(let i=0; i<5; i++){
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 8), new THREE.MeshBasicMaterial({color: 0xff3333, transparent: true, opacity: 0.6}));
+        scene.add(m); lpMeshes.push(m);
+    }
+
+    const craft = new THREE.Group();
+    const satBody = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.02), new THREE.MeshPhongMaterial({color: 0xeeeeee, specular: 0x333333}));
+    craft.add(satBody);
+    const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.002, 0.06, 0.02), new THREE.MeshPhongMaterial({color: 0x0055ff, emissive: 0x001133}));
+    p1.position.set(0.03, 0, 0); p1.visible = false; craft.add(p1);
+    const p2 = p1.clone(); p2.position.set(-0.03, 0, 0); craft.add(p2);
+    scene.add(craft);
+
+    const booster = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.05), new THREE.MeshBasicMaterial({color: 0x333333}));
+    scene.add(booster); booster.visible = false;
+
+    const trailGeo = new THREE.BufferGeometry();
+    const trailPos = new Float32Array(400000 * 3);
+    trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
+    const trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0x00f2ff, transparent: true, opacity: 0.3 }));
+    scene.add(trail);
+    let pIdx = 0;
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(30, 20, 30); scene.add(sun);
+
+    function log(m, type="STATUS") {
+        const t = document.getElementById('terminal');
+        const color = type === "WARN" ? "var(--warn)" : (type === "ERR" ? "var(--danger)" : "var(--safe)");
+        t.innerHTML = `<div class="log-entry"> <span style="color:#5a8a9a">${time.toFixed(1)}s</span> | <span style="color:${color}">${type}:</span> ${m}</div>` + t.innerHTML;
+    }
+
+    // ACTIONS
+    document.getElementById('btn-launch').addEventListener('click', () => {
+        let c = 3; document.getElementById('btn-launch').disabled = true;
+        log("SYSTEM BOOT: CORE V18.0 INITIALIZED.", "BOOT");
+        log("CHECKING PROPELLANT PRESSURES... OK.", "INFO");
+        const itv = setInterval(() => {
+            document.getElementById('countdown-ui').innerText = c;
+            if(c === 0) {
+                clearInterval(itv);
+                document.getElementById('countdown-ui').innerText = "IGNT";
+                state = 'ASCENT';
+                log("MAIN ENGINE START. CLAMP RELEASE.", "LAUNCH");
+            }
+            c--;
+        }, 1000);
+    });
+
+    document.getElementById('btn-sep').addEventListener('click', () => {
+        b.active = true; b.x = s.x; b.y = s.y; b.z = s.z; b.vx = s.vx*0.75;
+        booster.visible = true;
+        log("STAGE 1 DETACHED. BALLISTIC DECAY INITIATED.", "INFO");
+        document.getElementById('btn-sep').disabled = true; document.getElementById('btn-panels').disabled = false;
+    });
+
+    document.getElementById('btn-panels').addEventListener('click', () => {
+        p1.visible = p2.visible = true;
+        log("SOLAR ARRAYS EXTENDED. PHOTON CAPTURE ACTIVE.", "INFO");
+        document.getElementById('btn-panels').disabled = true; document.getElementById('btn-tli').disabled = false;
+    });
+
+    document.getElementById('btn-tli').addEventListener('click', () => {
+        state = 'TLI'; log("TLI BURN START. VECTORING TO LUNAR INTERCEPT.", "WARN");
+        document.getElementById('btn-tli').disabled = true;
+    });
+
+    document.getElementById('warp-slider').oninput = function() { warp = parseInt(this.value); document.getElementById('warp-val').innerText = warp + "x"; };
+
+    function updatePhysics(dt) {
+        if (state === 'GROUND') return;
+        const sub = 60; const sdt = (dt / sub) * warp;
+        for(let i=0; i<sub; i++) {
+            const moonA = time * 0.0000045;
+            const mx = Math.cos(moonA)*DIST_M*SCALE, mz = Math.sin(moonA)*DIST_M*SCALE;
+            moon.position.set(mx, 0, mz);
+
+            // Lagrange mapping
+            const dist = DIST_M*SCALE;
+            lpMeshes[0].position.set(mx*0.84,0,mz*0.84);
+            lpMeshes[1].position.set(mx*1.16,0,mz*1.16);
+            lpMeshes[2].position.set(-mx,0,-mz);
+            lpMeshes[3].position.set(Math.cos(moonA+Math.PI/3)*dist,0,Math.sin(moonA+Math.PI/3)*dist);
+            lpMeshes[4].position.set(Math.cos(moonA-Math.PI/3)*dist,0,Math.sin(moonA-Math.PI/3)*dist);
+
+            if (state === 'ASCENT') {
+                let alt = Math.min(400, (time/1.5)*20); s.x = (R_E+alt)*SCALE;
+                if (alt>=400) { state='ORBIT'; s.vy = Math.sqrt(GM_E/(R_E+400)); log("LEO STABILIZED (400KM)."); document.getElementById('btn-sep').disabled=false; }
+            } else if (state !== 'LANDED') {
+                let rV = new THREE.Vector3(s.x, s.y, s.z);
+                let acc = rV.clone().normalize().multiplyScalar(-GM_E / (Math.max(R_E, rV.length()/SCALE)**2));
+                let dM = rV.distanceTo(moon.position);
+
+                if (state === 'TLI') {
+                    let burn = 4.2;
+                    acc.add(moon.position.clone().sub(rV).normalize().multiplyScalar(burn)); fuel -= 0.015; dv_spent += burn * sdt;
+                    if (rV.length()/SCALE > 195000) state = 'TRANSIT';
+                }
+
+                if (dM/SCALE < 75000) {
+                    let gM = moon.position.clone().sub(rV).normalize().multiplyScalar(GM_M / (Math.max(R_M, dM/SCALE)**2));
+                    acc.add(gM);
+                    let altM = dM/SCALE - R_M;
+                    let vRel = new THREE.Vector3(s.vx, s.vy, s.vz);
+                    if (altM < 18000) {
+                        if(state !== 'DESCENT') { state = 'DESCENT'; log("LUNAR GRAVITY CAPTURE. ORIENTING RETRO-THRUSTERS.", "WARN"); }
+                        acc.add(moon.position.clone().sub(rV).normalize().multiplyScalar(2.8));
+                        if(altM < 6000) {
+                            let brake = 1.7; acc.add(vRel.clone().multiplyScalar(-brake)); dv_spent += brake * sdt;
+                        }
+                    }
+                    if (vRel.length() < 0.04 && altM < 1.6) {
+                        state = 'LANDED'; s.vx=s.vy=s.vz=0;
+                        log("TOUCHDOWN! COORDINATES LOCKED. CHASSIS INTEGRITY 100%.", "SUCCESS");
+                        log("DEPLOYING SURFACE INSTRUMENTS.", "INFO");
+                        document.getElementById('countdown-ui').innerText = "DONE";
+                    }
+                }
+                s.vx += acc.x * sdt; s.vy += acc.y * sdt; s.vz += acc.z * sdt;
+                s.x += s.vx*SCALE*sdt; s.y += s.vy*SCALE*sdt; s.z += s.vz*SCALE*sdt;
+            }
+            if (b.active) b.x += b.vx*SCALE*sdt;
+            time += sdt;
+            if (i % 15 === 0) {
+                const idx = (pIdx % 400000)*3; trailPos[idx]=s.x; trailPos[idx+1]=s.y; trailPos[idx+2]=s.z;
+                pIdx++; trail.geometry.attributes.position.needsUpdate = true;
+            }
+        }
+    }
+
+    function updateLabels() {
+        lpMeshes.forEach((mesh, idx) => {
+            const vector = mesh.position.clone().project(camera);
+            const label = document.getElementById(`L${idx+1}-label`);
+            if(vector.z < 1) {
+                label.style.display = 'block';
+                label.style.left = (vector.x + 1) / 2 * window.innerWidth + 'px';
+                label.style.top = -(vector.y - 1) / 2 * window.innerHeight + 'px';
+            } else { label.style.display = 'none'; }
+        });
+    }
+
+    function animate() {
+        requestAnimationFrame(animate); updatePhysics(0.016); updateLabels();
+        craft.position.set(s.x, s.y, s.z); if(b.active) booster.position.set(b.x,b.y,b.z);
+        let dE = new THREE.Vector3(s.x, s.y, s.z).length()/SCALE;
+        let dM = new THREE.Vector3(s.x, s.y, s.z).distanceTo(moon.position)/SCALE;
+        document.getElementById('alt-val').innerText = Math.floor(Math.max(0,dE-R_E)).toLocaleString() + " KM";
+        document.getElementById('alt-moon').innerText = Math.floor(Math.max(0,dM-R_M)).toLocaleString() + " KM";
+        document.getElementById('vel-val').innerText = Math.sqrt(s.vx**2+s.vy**2+s.vz**2).toFixed(3) + " KM/S";
+        document.getElementById('status-val').innerText = state.toUpperCase();
+        document.getElementById('fuel-val').innerText = Math.max(0, Math.floor(fuel)) + "%";
+        document.getElementById('dv-val').innerText = dv_spent.toFixed(1) + " km/s";
+        document.getElementById('cpu-val').innerText = (10 + Math.random()*5).toFixed(1) + "%";
+        document.getElementById('phase-val').innerText = ( (time*0.0000045 * 180 / Math.PI) % 360).toFixed(1) + "°";
+        controls.update(); renderer.render(scene, camera);
+    }
+    animate();
+</script>
+</body>
+</html>
