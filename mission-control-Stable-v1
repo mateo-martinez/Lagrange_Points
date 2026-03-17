@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>NASA MISSION CONTROL v76.0 - ESCAPE PROTOCOL</title>
+    <style>
+        :root { --neon: #00f2ff; --bg: #000810; --safe: #00ff88; --danger: #ff3333; --warn: #ffcc00; }
+        body, html { margin:0; padding:0; width:100%; height:100%; background:var(--bg); color:var(--neon); font-family: 'JetBrains Mono', monospace; overflow:hidden; }
+        #hud { position:absolute; inset:0; pointer-events:none; z-index:10; padding:20px; display:grid; grid-template-columns: 350px 1fr 350px; gap:15px; }
+        .panel { pointer-events:auto; background:rgba(0,12,24,0.95); border:1px solid var(--neon); padding:15px; border-radius: 4px; box-shadow: 0 0 20px rgba(0,242,255,0.1); }
+        .stat-val { font-size:22px; color:var(--safe); font-weight:bold; display:block; margin-bottom:5px; font-variant-numeric: tabular-nums; }
+        #log { height:200px; overflow-y:auto; font-size:11px; color:#aaa; border-top:1px solid #1a3a4a; padding-top:10px; margin-top:10px; }
+        button { width:100%; padding:12px; margin:5px 0; background:transparent; color:var(--neon); border:1px solid var(--neon); cursor:pointer; font-weight:bold; text-transform:uppercase; transition: 0.2s; }
+        button:hover { background:var(--neon); color:#000; box-shadow: 0 0 15px var(--neon); }
+        .btn-launch { background: var(--danger) !important; color: white !important; border:none !important; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+<div id="container"></div>
+
+<div id="hud">
+    <div class="panel">
+        <h2 style="font-size:14px; margin:0 0 10px; border-bottom: 1px solid var(--neon);">COMMANDER: MARTINEZ</h2>
+        <button class="btn-launch" onclick="cmd('LAUNCH')">FORCE LIFTOFF (T-0)</button>
+        <button onclick="cmd('LEO')">ORBITAL INSERTION (LEO)</button>
+        <button onclick="cmd('TLI')">TRANS-LUNAR INJECTION</button>
+        <button style="color:var(--danger); border-color:var(--danger);" onclick="cmd('RET')">RETRO-BURN / RETURN</button>
+        <div id="log">>> STANDBY. AWAITING FORCE LIFTOFF.</div>
+    </div>
+
+    <div></div>
+
+    <div class="panel" style="border-right: 4px solid var(--safe);">
+        <h2 style="font-size:14px; margin:0 0 10px;">TELEMETRY</h2>
+        <label style="font-size:9px;">ALTITUDE (KM)</label>
+        <span class="stat-val" id="alt-val">0.0</span>
+        <label style="font-size:9px;">VELOCITY (KM/S)</label>
+        <span class="stat-val" id="vel-val">0.000</span>
+        <label style="font-size:9px;">LAGRANGE POINT</label>
+        <span class="stat-val" id="lagrange-val" style="color:var(--warn)">SCANNING...</span>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+    const R_E = 6371, R_M = 1737, DIST_M = 384400, GM_E = 398600, GM_M = 4902;
+    const SCALE = 1 / 10000;
+
+    // Start slightly above surface to avoid float-rounding "stickiness"
+    let s = { x: (R_E + 10) * SCALE, y: 0, vx: 0, vy: 0 }; 
+    let active = false, time = 0, state = 'IDLE';
+    let thrust = 0, burnDir = {x:0, y:0};
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.0001, 5000);
+    camera.position.set(0, -1.8, 1.2);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('container').appendChild(renderer.domElement);
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+    const loader = new THREE.TextureLoader();
+    const earth = new THREE.Mesh(new THREE.SphereGeometry(R_E*SCALE, 64, 64), new THREE.MeshPhongMaterial({ map: loader.load('https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg') }));
+    scene.add(earth);
+
+    // Lagrange and Moon Tracks
+    const moonOrbit = new THREE.Mesh(new THREE.TorusGeometry(DIST_M*SCALE, 0.0003, 8, 128), new THREE.MeshBasicMaterial({ color: 0x222222 }));
+    scene.add(moonOrbit);
+
+    const moon = new THREE.Mesh(new THREE.SphereGeometry(R_M*SCALE, 32, 32), new THREE.MeshPhongMaterial({ map: loader.load('https://threejs.org/examples/textures/planets/moon_1024.jpg') }));
+    scene.add(moon);
+
+    // Lagrange Points (L1-L5)
+    const lpts = [];
+    const colors = [0xff4444, 0xffaa00, 0xffff00, 0x00ff00, 0x0000ff];
+    for(let i=0; i<5; i++) {
+        const p = new THREE.Mesh(new THREE.SphereGeometry(0.004, 8, 8), new THREE.MeshBasicMaterial({ color: colors[i] }));
+        scene.add(p);
+        lpts.push(p);
+    }
+
+    const sat = new THREE.Mesh(new THREE.ConeGeometry(0.006, 0.015, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    scene.add(sat);
+
+    const trailGeo = new THREE.BufferGeometry();
+    const trailPos = new Float32Array(30000 * 3);
+    trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
+    scene.add(new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0x00f2ff, transparent:true, opacity:0.5 })));
+    let tIdx = 0;
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+    const sun = new THREE.PointLight(0xffffff, 1.5); sun.position.set(10, 10, 10); scene.add(sun);
+
+    function updateLPoints(angle) {
+        const d = DIST_M * SCALE;
+        const mu = GM_M / (GM_E + GM_M);
+        const r_l1 = d * (1 - Math.pow(mu/3, 1/3));
+        const r_l2 = d * (1 + Math.pow(mu/3, 1/3));
+        lpts[0].position.set(Math.cos(angle)*r_l1, Math.sin(angle)*r_l1, 0); // L1
+        lpts[1].position.set(Math.cos(angle)*r_l2, Math.sin(angle)*r_l2, 0); // L2
+        lpts[2].position.set(Math.cos(angle+Math.PI)*d, Math.sin(angle+Math.PI)*d, 0); // L3
+        lpts[3].position.set(Math.cos(angle+Math.PI/3)*d, Math.sin(angle+Math.PI/3)*d, 0); // L4
+        lpts[4].position.set(Math.cos(angle-Math.PI/3)*d, Math.sin(angle-Math.PI/3)*d, 0); // L5
+    }
+
+    function step(dt) {
+        const moonA = time * 0.000005;
+        moon.position.set(Math.cos(moonA)*DIST_M*SCALE, Math.sin(moonA)*DIST_M*SCALE, 0);
+        updateLPoints(moonA);
+
+        const dE_km = Math.sqrt(s.x**2 + s.y**2) / SCALE;
+        const dM_km = Math.sqrt((s.x - moon.position.x)**2 + (s.y - moon.position.y)**2) / SCALE;
+        
+        const accE = -GM_E / (dE_km**2);
+        const accM = -GM_M / (dM_km**2);
+
+        const ux_E = (s.x/SCALE)/dE_km, uy_E = (s.y/SCALE)/dE_km;
+        const ux_M = (s.x/SCALE - moon.position.x/SCALE)/dM_km, uy_M = (s.y/SCALE - moon.position.y/SCALE)/dM_km;
+
+        const ax = accE*ux_E + accM*ux_M + (thrust * burnDir.x);
+        const ay = accE*uy_E + accM*uy_M + (thrust * burnDir.y);
+
+        s.vx += ax * dt; s.vy += ay * dt;
+        s.x += s.vx * SCALE * dt; s.y += s.vy * SCALE * dt;
+        time += dt;
+    }
+
+    function cmd(type) {
+        const l = document.getElementById('log');
+        switch(type) {
+            case 'LAUNCH':
+                active = true; state = 'BOOST';
+                // Immediate breakout velocity
+                s.vx = 3.5; s.vy = 2.5; thrust = 0.06;
+                l.innerHTML += `<div style="color:var(--safe)">>> BREAKOUT COMMAND EXECUTED. LIFTOFF!</div>`;
+                break;
+            case 'LEO':
+                state = 'LEO_BURN';
+                l.innerHTML += `<div>>> CIRCULARIZING AT CURRENT ALTITUDE...</div>`;
+                break;
+            case 'TLI':
+                state = 'TLI_BURN';
+                l.innerHTML += `<div>>> TRANS-LUNAR INJECTION START.</div>`;
+                break;
+        }
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if(active) {
+            for(let i=0; i<120; i++) step(0.1); 
+            sat.position.set(s.x, s.y, 0);
+            trailPos[tIdx*3] = s.x; trailPos[tIdx*3+1] = s.y; trailPos[tIdx*3+2] = 0;
+            tIdx = (tIdx + 1) % 30000;
+            trailGeo.attributes.position.needsUpdate = true;
+
+            const dE_km = Math.sqrt(s.x**2 + s.y**2) / SCALE;
+            const alt = dE_km - R_E;
+            const vel = Math.sqrt(s.vx**2 + s.vy**2);
+            const angleE = Math.atan2(s.y, s.x);
+
+            document.getElementById('alt-val').innerText = alt.toFixed(1) + " KM";
+            document.getElementById('vel-val').innerText = vel.toFixed(3) + " KM/S";
+
+            // Automation
+            const tx = -Math.sin(angleE), ty = Math.cos(angleE);
+            if(state === 'BOOST' && alt > 300) { thrust = 0; state = 'COAST'; }
+            if(state === 'LEO_BURN') {
+                burnDir = { x: tx, y: ty }; thrust = 0.1;
+                if(vel >= 7.8) { thrust = 0; state = 'LEO'; }
+            }
+            if(state === 'TLI_BURN') {
+                burnDir = { x: tx, y: ty }; thrust = 0.15;
+                if(vel >= 10.9) { thrust = 0; state = 'TRANSIT'; }
+            }
+        }
+        controls.update();
+        renderer.render(scene, camera);
+    }
+    animate();
+</script>
+</body>
+</html>
