@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mission Control V25</title>
+
+<style>
+body{margin:0;background:#020611;color:#00eaff;font-family:monospace;overflow:hidden}
+#ui{position:absolute;top:10px;left:10px;width:340px}
+.panel{background:rgba(0,20,40,.9);border:1px solid #00eaff;padding:10px;margin-bottom:10px}
+#log{position:absolute;bottom:0;left:0;right:0;height:180px;background:black;overflow:auto;padding:6px;font-size:12px}
+button{width:100%;margin-top:4px;padding:6px;background:#001820;color:#00eaff;border:1px solid #00eaff}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+
+<div class="panel">
+<button onclick="startCountdown()">START COUNTDOWN</button>
+<button onclick="setPhase('LIFTOFF')">LIFTOFF</button>
+<button onclick="setPhase('TURN')">GRAVITY TURN</button>
+<button onclick="setPhase('ORBIT')">ORBIT INSERTION</button>
+<button onclick="lockEarth()">LOCK EARTH ORBIT</button>
+<button onclick="setPhase('TLI')">TLI</button>
+<button onclick="setPhase('CAPTURE')">LUNAR CAPTURE</button>
+<button onclick="lockMoon()">LOCK LUNAR ORBIT</button>
+<button onclick="autoMission()">AUTO</button>
+</div>
+
+<div class="panel" id="tele"></div>
+
+</div>
+
+<div id="log"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+
+// SCENE
+const scene=new THREE.Scene()
+const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.001,100)
+camera.position.set(0,-2.5,1.5)
+
+const renderer=new THREE.WebGLRenderer({antialias:true})
+renderer.setSize(innerWidth,innerHeight)
+document.body.appendChild(renderer.domElement)
+
+const controls=new THREE.OrbitControls(camera,renderer.domElement)
+
+// LIGHT
+scene.add(new THREE.AmbientLight(0x666666))
+const light=new THREE.DirectionalLight(0xffffff,1)
+light.position.set(3,3,3)
+scene.add(light)
+
+// EARTH
+const earthR=0.12
+const earth=new THREE.Mesh(
+new THREE.SphereGeometry(earthR,64,64),
+new THREE.MeshPhongMaterial({color:0x2266ff})
+)
+scene.add(earth)
+
+// MOON
+const moon=new THREE.Mesh(
+new THREE.SphereGeometry(0.04,32,32),
+new THREE.MeshPhongMaterial({color:0xaaaaaa})
+)
+scene.add(moon)
+
+let moonAngle=0
+const moonOrbit=1
+
+// ORBITS
+function orbit(r,color){
+let pts=[]
+for(let i=0;i<200;i++){
+let a=i/200*Math.PI*2
+pts.push(new THREE.Vector3(Math.cos(a)*r,Math.sin(a)*r,0))
+}
+let geo=new THREE.BufferGeometry().setFromPoints(pts)
+let mat=new THREE.LineDashedMaterial({color:color,dashSize:0.03,gapSize:0.02})
+let l=new THREE.Line(geo,mat)
+l.computeLineDistances()
+scene.add(l)
+}
+orbit(0.35,0x00ff00)
+orbit(moonOrbit,0xffaa00)
+
+// LAGRANGE
+function lag(x,y){
+let p=new THREE.Mesh(new THREE.SphereGeometry(0.01),new THREE.MeshBasicMaterial({color:0xff00ff}))
+p.position.set(x,y,0)
+scene.add(p)
+}
+lag(0.85,0); lag(1.15,0); lag(0.5,0.86); lag(0.5,-0.86); lag(1,0)
+
+// SAT
+const sat=new THREE.Mesh(
+new THREE.SphereGeometry(0.01),
+new THREE.MeshBasicMaterial({color:0xffffff})
+)
+scene.add(sat)
+
+// TRAIL
+let trail=[]
+const trailGeo=new THREE.BufferGeometry()
+const trailLine=new THREE.Line(trailGeo,new THREE.LineBasicMaterial({color:0x00ffff}))
+scene.add(trailLine)
+
+// STATE
+let phase="PRELAUNCH"
+let pos=new THREE.Vector2(earthR,0)
+let vel=new THREE.Vector2(0,0)
+let earthLock=false, moonLock=false
+let distance=0, temp=20
+
+// LOG
+function log(t){
+let el=document.getElementById("log")
+el.innerHTML+="<br>> "+t
+el.scrollTop=el.scrollHeight
+}
+
+// COUNTDOWN
+function startCountdown(){
+let t=10
+log("T-10: Initiating launch sequence")
+let i=setInterval(()=>{
+t--
+log("T-"+t)
+if(t==0){
+clearInterval(i)
+log("Ignition sequence start")
+setPhase("LIFTOFF")
+}
+},1000)
+}
+
+// CONTROL
+function setPhase(p){
+phase=p
+log("Phase: "+p)
+}
+
+function lockEarth(){
+earthLock=true; moonLock=false
+log("Stable Earth orbit achieved")
+}
+
+function lockMoon(){
+earthLock=false; moonLock=true
+log("Stable lunar orbit achieved")
+}
+
+function autoMission(){
+startCountdown()
+setTimeout(()=>setPhase("TURN"),12000)
+setTimeout(()=>setPhase("ORBIT"),16000)
+setTimeout(()=>lockEarth(),20000)
+setTimeout(()=>setPhase("TLI"),24000)
+setTimeout(()=>setPhase("CAPTURE"),30000)
+setTimeout(()=>lockMoon(),34000)
+}
+
+// PHYSICS
+function step(){
+
+moonAngle+=0.002
+moon.position.set(Math.cos(moonAngle)*moonOrbit,Math.sin(moonAngle)*moonOrbit,0)
+
+if(phase==="PRELAUNCH") return
+
+let r=pos.length()
+let radial=pos.clone().normalize()
+let tan=new THREE.Vector2(-pos.y,pos.x).normalize()
+
+if(phase==="LIFTOFF") vel.add(radial.multiplyScalar(0.003))
+if(phase==="TURN") vel.add(tan.multiplyScalar(0.003))
+if(phase==="ORBIT") vel.lerp(tan.multiplyScalar(Math.sqrt(1/0.35)),0.05)
+if(phase==="TLI") vel.multiplyScalar(1.01)
+if(phase==="CAPTURE") vel.multiplyScalar(0.98)
+
+if(earthLock){
+pos.normalize().multiplyScalar(0.35)
+vel.copy(tan.multiplyScalar(Math.sqrt(1/0.35)))
+}
+
+if(moonLock){
+let dx=pos.x-moon.position.x
+let dy=pos.y-moon.position.y
+let dir=new THREE.Vector2(dx,dy).normalize()
+let t=new THREE.Vector2(-dir.y,dir.x)
+pos.set(moon.position.x+dir.x*0.2,moon.position.y+dir.y*0.2)
+vel.copy(t.multiplyScalar(0.25))
+}
+
+// gravity
+let dx=-pos.x, dy=-pos.y
+let d=Math.hypot(dx,dy)+1e-5
+vel.x+=dx/(d*d*d)*0.01
+vel.y+=dy/(d*d*d)*0.01
+
+pos.x+=vel.x
+pos.y+=vel.y
+
+distance+=vel.length()*1000
+temp=20+vel.length()*40
+
+document.getElementById("tele").innerHTML=
+"Phase: "+phase+"<br>"+
+"Velocity: "+vel.length().toFixed(3)+" km/s<br>"+
+"Altitude: "+(pos.length()-earthR).toFixed(3)+"<br>"+
+"Orbit Error: "+Math.abs(pos.length()-0.35).toFixed(3)+"<br>"+
+"Moon Dist: "+Math.hypot(pos.x-moon.position.x,pos.y-moon.position.y).toFixed(3)+"<br>"+
+"Temp: "+temp.toFixed(1)+" C<br>"+
+"Distance: "+distance.toFixed(0)+" km"
+}
+
+// LOOP
+function animate(){
+requestAnimationFrame(animate)
+step()
+
+trail.push(new THREE.Vector3(pos.x,pos.y,0))
+if(trail.length>2000) trail.shift()
+trailGeo.setFromPoints(trail)
+
+sat.position.set(pos.x,pos.y,0)
+
+controls.update()
+renderer.render(scene,camera)
+}
+animate()
+
+</script>
+</body>
+</html>
