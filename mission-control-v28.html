@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mission Control V28 FINAL</title>
+
+<style>
+body{margin:0;background:#020611;color:#00eaff;font-family:monospace;overflow:hidden}
+#ui{position:absolute;top:10px;left:10px;width:340px}
+.panel{background:rgba(0,20,40,.9);border:1px solid #00eaff;padding:10px;margin-bottom:10px}
+#log{position:absolute;bottom:0;left:0;right:0;height:180px;background:black;overflow:auto;padding:6px;font-size:12px}
+button{width:100%;margin-top:4px;padding:6px;background:#001820;color:#00eaff;border:1px solid #00eaff}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+<div class="panel">
+<button onclick="startMission()">START MISSION</button>
+</div>
+
+<div class="panel" id="tele"></div>
+</div>
+
+<div id="log"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+
+// ===== SCENE =====
+const scene=new THREE.Scene()
+const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.001,100)
+camera.position.set(0,-2.5,1.5)
+
+const renderer=new THREE.WebGLRenderer({antialias:true})
+renderer.setSize(innerWidth,innerHeight)
+document.body.appendChild(renderer.domElement)
+
+const controls=new THREE.OrbitControls(camera,renderer.domElement)
+
+// ===== LIGHT =====
+scene.add(new THREE.AmbientLight(0x666666))
+const light=new THREE.DirectionalLight(0xffffff,1)
+light.position.set(3,3,3)
+scene.add(light)
+
+// ===== TEXTURES =====
+const loader=new THREE.TextureLoader()
+
+const earth=new THREE.Mesh(
+new THREE.SphereGeometry(0.12,64,64),
+new THREE.MeshPhongMaterial({
+map: loader.load("https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg")
+})
+)
+scene.add(earth)
+
+const moon=new THREE.Mesh(
+new THREE.SphereGeometry(0.04,32,32),
+new THREE.MeshPhongMaterial({
+map: loader.load("https://threejs.org/examples/textures/planets/moon_1024.jpg")
+})
+)
+scene.add(moon)
+
+let moonAngle=0
+const moonOrbit=1
+
+// ===== SAT =====
+const sat=new THREE.Mesh(
+new THREE.SphereGeometry(0.01),
+new THREE.MeshBasicMaterial({color:0xffffff})
+)
+scene.add(sat)
+
+// ===== STATE =====
+let pos=new THREE.Vector2(0.12,0)
+let vel=new THREE.Vector2(0,0)
+
+const mu=0.01
+const targetR=0.35
+
+let phase="IDLE"
+
+// ===== LOG =====
+function log(t){
+let el=document.getElementById("log")
+el.innerHTML+="<br>> "+t
+el.scrollTop=el.scrollHeight
+}
+
+// ===== START =====
+function startMission(){
+
+log("T-10 Launch sequence start")
+
+setTimeout(()=>{log("Ignition"); phase="ASCENT"},10000)
+setTimeout(()=>{log("Gravity turn"); phase="TURN"},14000)
+setTimeout(()=>{log("Orbit insertion"); phase="ORBIT"},20000)
+
+}
+
+// ===== PHYSICS =====
+function step(){
+
+moonAngle+=0.002
+moon.position.set(Math.cos(moonAngle)*moonOrbit,Math.sin(moonAngle)*moonOrbit,0)
+
+let r=pos.length()
+let radial=pos.clone().normalize()
+let tangent=new THREE.Vector2(-pos.y,pos.x).normalize()
+
+// gravedad
+let accel = radial.clone().multiplyScalar(-mu/(r*r))
+vel.add(accel)
+
+// autopilot
+if(phase==="ASCENT"){
+vel.add(radial.multiplyScalar(0.0005))
+}
+
+if(phase==="TURN"){
+vel.add(tangent.multiplyScalar(0.0007))
+}
+
+if(phase==="ORBIT"){
+
+let desiredV=Math.sqrt(mu/r)
+let currentV=vel.length()
+
+// corregir velocidad
+let diff=desiredV-currentV
+vel.add(tangent.multiplyScalar(diff*0.05))
+
+// corregir altura
+let err=targetR-r
+vel.add(radial.multiplyScalar(err*0.01))
+}
+
+// damping leve (evita escapes)
+vel.multiplyScalar(0.999)
+
+// integrar
+pos.add(vel)
+
+// ===== TELEMETRY =====
+document.getElementById("tele").innerHTML=
+"Phase: "+phase+"<br>"+
+"Velocity: "+vel.length().toFixed(4)+"<br>"+
+"Altitude: "+(r-0.12).toFixed(4)+"<br>"+
+"Target Orbit Error: "+(targetR-r).toFixed(4)
+
+}
+
+// ===== LOOP =====
+function animate(){
+requestAnimationFrame(animate)
+
+step()
+
+sat.position.set(pos.x,pos.y,0)
+
+controls.update()
+renderer.render(scene,camera)
+}
+
+animate()
+
+</script>
+</body>
+</html>
