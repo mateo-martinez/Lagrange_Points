@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>NASA MISSION CONTROL v78.0 - MATEO MARTINEZ</title>
+    <style>
+        :root { --neon: #00f2ff; --bg: #000810; --safe: #00ff88; --warn: #ffcc00; --danger: #ff3333; }
+        body, html { margin:0; padding:0; width:100%; height:100%; background:var(--bg); color:var(--neon); font-family: 'JetBrains Mono', monospace; overflow:hidden; }
+        #hud { position:absolute; inset:0; pointer-events:none; z-index:10; padding:20px; display:grid; grid-template-columns: 350px 1fr 350px; gap:15px; }
+        .panel { pointer-events:auto; background:rgba(0,10,20,0.95); border:1px solid var(--neon); padding:15px; border-radius: 4px; }
+        .stat-val { font-size:20px; color:var(--safe); font-weight:bold; display:block; margin-bottom:5px; font-variant-numeric: tabular-nums; }
+        #log { height:250px; overflow-y:auto; font-size:11px; color:#888; border-top:1px solid #1a3a4a; padding-top:10px; margin-top:10px; line-height:1.4; }
+        button { width:100%; padding:15px; background:var(--danger); color:white; border:none; cursor:pointer; font-weight:bold; text-transform:uppercase; font-size:14px; transition: 0.3s; }
+        button:hover { background: #ff0000; box-shadow: 0 0 20px var(--danger); }
+        .phase-tag { color: var(--warn); font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="container"></div>
+
+<div id="hud">
+    <div class="panel">
+        <h2 style="font-size:14px; margin:0 0 10px; border-bottom:1px solid var(--neon);">FLIGHT DIRECTOR: MARTINEZ</h2>
+        <button id="launch-btn" onclick="startSequence()">INITIATE COUNTDOWN</button>
+        <div id="log">>> STANDBY FOR TERMINAL COUNTDOWN...</div>
+    </div>
+
+    <div></div> <div class="panel" style="border-right: 4px solid var(--safe);">
+        <h2 style="font-size:14px; margin:0 0 10px;">TELEMETRY</h2>
+        <label style="font-size:9px;">ALTITUDE (KM)</label>
+        <span class="stat-val" id="alt-val">0.0</span>
+        <label style="font-size:9px;">VELOCITY (KM/S)</label>
+        <span class="stat-val" id="vel-val">0.000</span>
+        <label style="font-size:9px;">T-MINUS / MET</label>
+        <span class="stat-val" id="timer-val">T-00:00</span>
+        <label style="font-size:9px;">ACTIVE STAGE</label>
+        <span class="stat-val" id="stage-val" style="color:var(--warn)">FULL VEHICLE</span>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+    const R_E = 6371, GM_E = 398600;
+    const SCALE = 1 / 10000;
+
+    let s = { x: (R_E + 0.1) * SCALE, y: 0, vx: 0, vy: 0 };
+    let active = false, time = 0, countdown = 10, phase = 0;
+    let thrust = 0, burnDir = {x:0, y:0};
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.0001, 5000);
+    camera.position.set(0, -1.8, 1.2);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('container').appendChild(renderer.domElement);
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+    const loader = new THREE.TextureLoader();
+    const earth = new THREE.Mesh(new THREE.SphereGeometry(R_E*SCALE, 64, 64), new THREE.MeshPhongMaterial({ map: loader.load('https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg') }));
+    scene.add(earth);
+
+    // Rocket Stages (Visuals)
+    const stage1 = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.04, 16), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    const stage2 = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.02, 16), new THREE.MeshBasicMaterial({ color: 0xaaaaaa }));
+    stage2.position.y = 0.03; // Stacked
+    const fairing = new THREE.Mesh(new THREE.ConeGeometry(0.006, 0.015, 16), new THREE.MeshBasicMaterial({ color: 0xdddddd }));
+    fairing.position.y = 0.0475;
+
+    const rocket = new THREE.Group();
+    rocket.add(stage1); rocket.add(stage2); rocket.add(fairing);
+    scene.add(rocket);
+
+    const trailGeo = new THREE.BufferGeometry();
+    const trailPos = new Float32Array(50000 * 3);
+    trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
+    scene.add(new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0x00f2ff, transparent:true, opacity:0.6 })));
+    let tIdx = 0;
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    const sun = new THREE.PointLight(0xffffff, 1.2); sun.position.set(10, 10, 10); scene.add(sun);
+
+    function addLog(m, c='#888') {
+        const l = document.getElementById('log');
+        const timeStr = phase < 2 ? `T-${countdown}` : `T+${time.toFixed(1)}`;
+        l.innerHTML += `<div>[${timeStr}] <span style="color:${c}">${m}</span></div>`;
+        l.scrollTop = l.scrollHeight;
+    }
+
+    function step(dt) {
+        const dE_vec = Math.sqrt(s.x**2 + s.y**2);
+        const dE_km = dE_vec / SCALE;
+
+        // --- PRECISION COLLISION ---
+        if (dE_km < R_E) {
+            active = false; thrust = 0;
+            s.vx = 0; s.vy = 0;
+            addLog("CRITICAL FAILURE: GROUND COLLISION DETECTED.", "var(--danger)");
+            document.getElementById('phase-val').innerText = "CRAHSED";
+            return;
+        }
+
+        const accG = -GM_E / (dE_km**2);
+        const ux = (s.x/SCALE)/dE_km, uy = (s.y/SCALE)/dE_km;
+
+        const ax = accG * ux + (thrust * burnDir.x);
+        const ay = accG * uy + (thrust * burnDir.y);
+
+        s.vx += ax * dt; s.vy += ay * dt;
+        s.x += s.vx * SCALE * dt; s.y += s.vy * SCALE * dt;
+        if (phase >= 2) time += dt;
+    }
+
+    function startSequence() {
+        if(phase > 0) return;
+        phase = 1;
+        document.getElementById('launch-btn').style.display = 'none';
+        const timer = setInterval(() => {
+            if(countdown > 0) {
+                addLog(`COUNTDOWN: ${countdown}...`);
+                document.getElementById('timer-val').innerText = `T-00:0${countdown}`;
+                countdown--;
+            } else {
+                clearInterval(timer);
+                ignite();
+            }
+        }, 1000);
+    }
+
+    function ignite() {
+        phase = 2; active = true;
+        addLog("LIFTOFF! S1 MAIN ENGINE IGNITION!", "var(--safe)");
+        document.getElementById('stage-val').innerText = "STAGE 1 ACTIVE";
+        // Immediate physical breakout velocity
+        s.vx = 2.8; s.vy = 1.8; thrust = 0.065;
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if(active) {
+            // HIGH-PRECISION PHYSICS SUB-STEPPING (100 steps per frame)
+            for(let i=0; i<100; i++) step(0.01);
+
+            rocket.position.set(s.x, s.y, 0);
+
+            trailPos[tIdx*3] = s.x; trailPos[tIdx*3+1] = s.y; trailPos[tIdx*3+2] = 0;
+            tIdx = (tIdx + 1) % 50000;
+            trailGeo.attributes.position.needsUpdate = true;
+
+            const dKM = (Math.sqrt(s.x**2 + s.y**2) / SCALE);
+            const alt = dKM - R_E;
+            const vel = Math.sqrt(s.vx**2 + s.vy**2);
+            const angleE = Math.atan2(s.y, s.x);
+
+            document.getElementById('alt-val').innerText = alt.toFixed(2) + " KM";
+            document.getElementById('vel-val').innerText = vel.toFixed(3) + " KM/S";
+            document.getElementById('timer-val').innerText = `T+${time.toFixed(0)}S`;
+
+            // --- AUTOMATED PHASE LOGIC ---
+            if(phase === 2 && alt > 90) {
+                phase = 3; addLog("MAX-Q. INITIATING GRAVITY TURN.");
+                document.getElementById('stage-val').innerText = "GRAVITY TURN";
+            }
+
+            if(phase === 3) {
+                burnDir = { x: -Math.sin(angleE) + 0.35, y: Math.cos(angleE) + 0.35 };
+                if(alt > 160) {
+                    phase = 4; addLog("MECO. STAGE 1 SEPARATION CONFIRMED.", "var(--warn)");
+                    document.getElementById('stage-val').innerText = "STAGE 2 ACTIVE";
+                    // Visual separation
+                    scene.remove(stage1);
+                    thrust = 0.025; // Lower thrust S2
+                }
+            }
+
+            if(phase === 4 && alt > 210) {
+                phase = 5; addLog("FAIRING DEPLOYMENT. PAYLOAD EXPOSED.");
+                scene.remove(fairing);
+            }
+
+            if(phase === 5 && alt > 400) {
+                phase = 6; addLog("INSERTION BURN START. CIRCULARIZING...", "var(--neon)");
+                thrust = 0.14; // High thrust insertion
+            }
+
+            if(phase === 6) {
+                burnDir = { x: -Math.sin(angleE), y: Math.cos(angleE) };
+                if(vel >= 7.82) {
+                    phase = 7; thrust = 0;
+                    addLog("STABLE ORBIT ACHIEVED. ALL SYSTEMS NOMINAL.", "var(--safe)");
+                    document.getElementById('stage-val').innerText = "ORBITAL (S2 CUTOFF)";
+                }
+            }
+        }
+        controls.update();
+        renderer.render(scene, camera);
+    }
+    animate();
+</script>
+</body>
+</html>
