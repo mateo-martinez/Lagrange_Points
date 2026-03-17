@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mission Control V24</title>
+
+<style>
+body{margin:0;background:#020611;color:#00eaff;font-family:monospace;overflow:hidden}
+#ui{position:absolute;top:10px;left:10px;width:360px}
+.panel{background:rgba(0,20,40,.9);border:1px solid #00eaff;padding:10px;margin-bottom:10px}
+#log{position:absolute;bottom:0;left:0;right:0;height:200px;background:black;overflow:auto;padding:6px;font-size:12px}
+button{width:100%;margin-top:4px;padding:6px;background:#001820;color:#00eaff;border:1px solid #00eaff}
+h3{margin:0 0 6px 0}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+
+<div class="panel">
+<h3>MISSION CONTROL</h3>
+<button onclick="startCountdown()">START COUNTDOWN</button>
+<button onclick="setPhase('LIFTOFF')">LIFTOFF</button>
+<button onclick="setPhase('TURN')">GRAVITY TURN</button>
+<button onclick="setPhase('ORBIT')">ORBIT INSERTION</button>
+<button onclick="lockEarth()">LOCK EARTH ORBIT</button>
+<button onclick="setPhase('TLI')">TLI</button>
+<button onclick="setPhase('COAST')">COAST</button>
+<button onclick="setPhase('CAPTURE')">LUNAR CAPTURE</button>
+<button onclick="lockMoon()">LOCK LUNAR ORBIT</button>
+<button onclick="autoMission()">AUTO MISSION</button>
+</div>
+
+<div class="panel">
+<h3>TELEMETRY</h3>
+<div id="tele"></div>
+</div>
+
+</div>
+
+<div id="log"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+
+// ===== SCENE =====
+const scene=new THREE.Scene()
+const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.001,100)
+camera.position.set(0,-2.5,1.5)
+
+const renderer=new THREE.WebGLRenderer({antialias:true})
+renderer.setSize(innerWidth,innerHeight)
+document.body.appendChild(renderer.domElement)
+
+// ===== LIGHT =====
+scene.add(new THREE.AmbientLight(0x666666))
+const light=new THREE.DirectionalLight(0xffffff,1.2)
+light.position.set(3,3,3)
+scene.add(light)
+
+// ===== EARTH =====
+const earthRadius=0.12
+const earth=new THREE.Mesh(
+new THREE.SphereGeometry(earthRadius,64,64),
+new THREE.MeshPhongMaterial({color:0x2266ff})
+)
+scene.add(earth)
+
+// ===== MOON =====
+const moon=new THREE.Mesh(
+new THREE.SphereGeometry(0.04,32,32),
+new THREE.MeshPhongMaterial({color:0xaaaaaa})
+)
+scene.add(moon)
+
+let moonAngle=0
+
+// ===== SAT =====
+const sat=new THREE.Mesh(
+new THREE.SphereGeometry(0.01,16,16),
+new THREE.MeshBasicMaterial({color:0xffffff})
+)
+scene.add(sat)
+
+// ===== STATE =====
+let phase="PRELAUNCH"
+let countdown=10
+let counting=false
+
+let pos=new THREE.Vector2(earthRadius,0)
+let vel=new THREE.Vector2(0,0)
+
+let earthLock=false
+let moonLock=false
+
+let distance=0
+let temp=20
+
+// ===== LOG =====
+function log(msg){
+let el=document.getElementById("log")
+el.innerHTML+="<br>> "+msg
+el.scrollTop=el.scrollHeight
+}
+
+// ===== COUNTDOWN =====
+function startCountdown(){
+counting=true
+phase="COUNTDOWN"
+log("T-10 seconds: Launch sequence initiated")
+
+let interval=setInterval(()=>{
+countdown--
+log("T-"+countdown)
+
+if(countdown===6) log("Engine chill nominal")
+if(countdown===3) log("Final GO/NO-GO poll: GO")
+if(countdown===0){
+clearInterval(interval)
+log("Main engine ignition")
+setPhase("LIFTOFF")
+}
+},1000)
+}
+
+// ===== CONTROL =====
+function setPhase(p){
+phase=p
+log("Phase: "+p)
+
+if(p==="LIFTOFF") log("Liftoff - vehicle is ascending")
+if(p==="TURN") log("Gravity turn initiated")
+if(p==="ORBIT") log("Attempting orbit insertion burn")
+if(p==="TLI") log("Trans-Lunar Injection burn start")
+if(p==="CAPTURE") log("Lunar capture burn")
+}
+
+function lockEarth(){
+earthLock=true
+moonLock=false
+log("Stable Earth orbit achieved")
+}
+
+function lockMoon(){
+earthLock=false
+moonLock=true
+log("Stable lunar orbit achieved")
+}
+
+// ===== AUTO =====
+function autoMission(){
+startCountdown()
+setTimeout(()=>setPhase("TURN"),12000)
+setTimeout(()=>setPhase("ORBIT"),16000)
+setTimeout(()=>lockEarth(),20000)
+setTimeout(()=>setPhase("TLI"),24000)
+setTimeout(()=>setPhase("CAPTURE"),32000)
+setTimeout(()=>lockMoon(),36000)
+}
+
+// ===== PHYSICS =====
+function step(){
+
+moonAngle+=0.003
+moon.position.set(Math.cos(moonAngle),Math.sin(moonAngle),0)
+
+// PRELAUNCH → no movement
+if(phase==="PRELAUNCH") return
+
+let r=pos.length()
+let radial=pos.clone().normalize()
+let tangent=new THREE.Vector2(-pos.y,pos.x).normalize()
+
+if(phase==="LIFTOFF") vel.add(radial.multiplyScalar(0.005))
+if(phase==="TURN") vel.add(tangent.multiplyScalar(0.004))
+if(phase==="ORBIT") vel.lerp(tangent.multiplyScalar(Math.sqrt(1/0.35)),0.03)
+if(phase==="TLI") vel.multiplyScalar(1.01)
+if(phase==="CAPTURE") vel.multiplyScalar(0.98)
+
+if(earthLock){
+pos.normalize().multiplyScalar(0.35)
+vel.copy(tangent.multiplyScalar(Math.sqrt(1/0.35)))
+}
+
+if(moonLock){
+let dx=pos.x-moon.position.x
+let dy=pos.y-moon.position.y
+let dir=new THREE.Vector2(dx,dy).normalize()
+let tan=new THREE.Vector2(-dir.y,dir.x)
+pos.set(moon.position.x+dir.x*0.2,moon.position.y+dir.y*0.2)
+vel.copy(tan.multiplyScalar(0.25))
+}
+
+// gravity
+let dx=-pos.x, dy=-pos.y
+let dist=Math.hypot(dx,dy)+1e-5
+vel.x+=dx/(dist*dist*dist)*0.01
+vel.y+=dy/(dist*dist*dist)*0.01
+
+pos.x+=vel.x
+pos.y+=vel.y
+
+distance+=vel.length()*1000
+temp=20+vel.length()*50
+
+document.getElementById("tele").innerHTML=
+"Phase: "+phase+"<br>"+
+"Velocity: "+vel.length().toFixed(3)+" km/s<br>"+
+"Altitude: "+(pos.length()-earthRadius).toFixed(3)+" km<br>"+
+"Target Error: "+Math.abs(pos.length()-0.35).toFixed(3)+"<br>"+
+"Temp: "+temp.toFixed(1)+" C<br>"+
+"Distance: "+distance.toFixed(0)+" km"
+}
+
+// ===== LOOP =====
+function animate(){
+requestAnimationFrame(animate)
+step()
+sat.position.set(pos.x,pos.y,0)
+renderer.render(scene,camera)
+}
+animate()
+
+</script>
+</body>
+</html>
