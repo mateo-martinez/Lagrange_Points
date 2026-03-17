@@ -2,44 +2,26 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Mission Control V26 FINAL</title>
+<title>Mission Control V27</title>
 
 <style>
 body{margin:0;background:#020611;color:#00eaff;font-family:monospace;overflow:hidden}
-
-#ui{
-position:absolute;top:10px;left:10px;width:320px
-}
-
-.panel{
-background:rgba(0,20,40,.9);
-border:1px solid #00eaff;
-padding:10px;margin-bottom:10px
-}
-
-#log{
-position:absolute;bottom:0;left:0;right:0;height:180px;
-background:black;overflow:auto;padding:6px;font-size:12px
-}
-
-button{
-width:100%;margin-top:4px;padding:6px;
-background:#001820;color:#00eaff;border:1px solid #00eaff
-}
+#ui{position:absolute;top:10px;left:10px;width:320px}
+.panel{background:rgba(0,20,40,.9);border:1px solid #00eaff;padding:10px;margin-bottom:10px}
+#log{position:absolute;bottom:0;left:0;right:0;height:180px;background:black;overflow:auto;padding:6px;font-size:12px}
+button{width:100%;margin-top:4px;padding:6px;background:#001820;color:#00eaff;border:1px solid #00eaff}
 </style>
 </head>
 
 <body>
 
 <div id="ui">
-
 <div class="panel">
 <button onclick="startCountdown()">START COUNTDOWN</button>
 <button onclick="autoMission()">AUTO MISSION</button>
 </div>
 
 <div class="panel" id="tele"></div>
-
 </div>
 
 <div id="log"></div>
@@ -75,41 +57,14 @@ new THREE.MeshPhongMaterial({color:0x2266ff})
 scene.add(earth)
 
 // ===== MOON =====
-const moonOrbit=1
-let moonAngle=0
-
 const moon=new THREE.Mesh(
 new THREE.SphereGeometry(0.04,32,32),
 new THREE.MeshPhongMaterial({color:0xaaaaaa})
 )
 scene.add(moon)
 
-// ===== ORBITS =====
-function orbit(r,color){
-let pts=[]
-for(let i=0;i<200;i++){
-let a=i/200*Math.PI*2
-pts.push(new THREE.Vector3(Math.cos(a)*r,Math.sin(a)*r,0))
-}
-let geo=new THREE.BufferGeometry().setFromPoints(pts)
-let mat=new THREE.LineDashedMaterial({color:color,dashSize:0.03,gapSize:0.02})
-let l=new THREE.Line(geo,mat)
-l.computeLineDistances()
-scene.add(l)
-}
-orbit(0.35,0x00ff00)
-orbit(moonOrbit,0xffaa00)
-
-// ===== LAGRANGE =====
-function lag(x,y){
-let p=new THREE.Mesh(
-new THREE.SphereGeometry(0.01),
-new THREE.MeshBasicMaterial({color:0xff00ff})
-)
-p.position.set(x,y,0)
-scene.add(p)
-}
-lag(0.85,0); lag(1.15,0); lag(0.5,0.86); lag(0.5,-0.86); lag(1,0)
+let moonOrbit=1
+let moonAngle=0
 
 // ===== SAT =====
 const sat=new THREE.Mesh(
@@ -121,20 +76,24 @@ scene.add(sat)
 // ===== TRAIL =====
 let trail=[]
 const trailGeo=new THREE.BufferGeometry()
-const trailLine=new THREE.Line(
-trailGeo,
-new THREE.LineBasicMaterial({color:0x00ffff})
-)
+const trailLine=new THREE.Line(trailGeo,new THREE.LineBasicMaterial({color:0x00ffff}))
 scene.add(trailLine)
+
+// ===== LAGRANGE =====
+let lagPoints=[]
+for(let i=0;i<5;i++){
+let p=new THREE.Mesh(
+new THREE.SphereGeometry(0.01),
+new THREE.MeshBasicMaterial({color:0xff00ff})
+)
+scene.add(p)
+lagPoints.push(p)
+}
 
 // ===== STATE =====
 let phase="PRELAUNCH"
 let pos=new THREE.Vector2(earthR,0)
 let vel=new THREE.Vector2(0,0)
-
-let fuel=100
-let deltaV=9.5
-let status="IDLE"
 
 // ===== LOG =====
 function log(t){
@@ -147,18 +106,13 @@ el.scrollTop=el.scrollHeight
 function startCountdown(){
 let t=10
 phase="COUNTDOWN"
-log("T-10: Initiating launch sequence")
+log("T-10 Initiated")
 
 let i=setInterval(()=>{
 t--
 log("T-"+t)
-
-if(t==6) log("Engine chill nominal")
-if(t==3) log("GO/NO-GO poll: GO")
-
 if(t==0){
 clearInterval(i)
-log("Ignition")
 setPhase("LIFTOFF")
 }
 },1000)
@@ -173,64 +127,58 @@ log("Phase: "+p)
 // ===== AUTO =====
 function autoMission(){
 startCountdown()
-
-setTimeout(()=>setPhase("MAXQ"),15000)
-setTimeout(()=>{log("MECO"); setPhase("COAST")},20000)
-setTimeout(()=>log("Stage separation"),22000)
-setTimeout(()=>setPhase("STAGE2"),24000)
-setTimeout(()=>setPhase("ORBIT"),30000)
-}
-
-// ===== THRUST =====
-function thrust(dir,power){
-if(fuel<=0) return
-vel.add(dir.clone().multiplyScalar(power))
-fuel-=power*0.4
-deltaV-=power*0.01
+setTimeout(()=>setPhase("TURN"),12000)
+setTimeout(()=>setPhase("ORBIT"),20000)
 }
 
 // ===== PHYSICS =====
 function step(){
 
+// moon motion
 moonAngle+=0.002
 moon.position.set(Math.cos(moonAngle)*moonOrbit,Math.sin(moonAngle)*moonOrbit,0)
 
+// Lagrange dynamic
+let mx=moon.position.x
+let my=moon.position.y
+
+lagPoints[0].position.set(mx*0.85,my*0.85,0)
+lagPoints[1].position.set(mx*1.15,my*1.15,0)
+lagPoints[2].position.set(mx*0.5-my*0.3,my*0.5+mx*0.3,0)
+lagPoints[3].position.set(mx*0.5+my*0.3,my*0.5-mx*0.3,0)
+lagPoints[4].position.set(mx,my,0)
+
+// PRELAUNCH
 if(phase==="PRELAUNCH") return
 
 let radial=pos.clone().normalize()
 let tangent=new THREE.Vector2(-pos.y,pos.x).normalize()
 
+// CONTROLLED THRUST
 if(phase==="LIFTOFF"){
-thrust(radial,0.002)
-status="ASCENT"
+vel.add(radial.multiplyScalar(0.001))
 }
 
-if(phase==="MAXQ"){
-thrust(radial,0.001)
-status="MAX-Q"
-}
-
-if(phase==="STAGE2"){
-thrust(tangent,0.002)
-status="SECOND STAGE"
+if(phase==="TURN"){
+vel.add(tangent.multiplyScalar(0.001))
 }
 
 if(phase==="ORBIT"){
 let target=0.35
 let error=target-pos.length()
 
-thrust(tangent,0.0015)
-thrust(radial,error*0.002)
-
-status=Math.abs(error)<0.01?"STABLE":"CORRECTING"
+vel.add(tangent.multiplyScalar(0.0008))
+vel.add(radial.multiplyScalar(error*0.002))
 }
 
-// gravity
+// ===== GRAVITY (semi-stable) =====
 let dx=-pos.x, dy=-pos.y
 let d=Math.hypot(dx,dy)+1e-5
-vel.x+=dx/(d*d*d)*0.01
-vel.y+=dy/(d*d*d)*0.01
 
+vel.x+=dx/(d*d*d)*0.008
+vel.y+=dy/(d*d*d)*0.008
+
+// integrate
 pos.x+=vel.x
 pos.y+=vel.y
 
@@ -240,16 +188,11 @@ if(trail.length>2000) trail.shift()
 trailGeo.setFromPoints(trail)
 
 // ===== TELEMETRY =====
-let alt=pos.length()-earthR
-
 document.getElementById("tele").innerHTML=
 "Phase: "+phase+"<br>"+
-"Status: "+status+"<br>"+
-"Velocity: "+vel.length().toFixed(3)+" km/s<br>"+
-"Altitude: "+alt.toFixed(3)+"<br>"+
-"Orbit Error: "+(0.35-pos.length()).toFixed(4)+"<br>"+
-"Fuel: "+fuel.toFixed(1)+" %<br>"+
-"Delta-V: "+deltaV.toFixed(2)+" km/s"
+"Velocity: "+vel.length().toFixed(4)+"<br>"+
+"Altitude: "+(pos.length()-earthR).toFixed(4)+"<br>"+
+"Orbit Error: "+(0.35-pos.length()).toFixed(4)
 
 }
 
