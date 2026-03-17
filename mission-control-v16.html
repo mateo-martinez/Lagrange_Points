@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mission Control V16</title>
+
+<style>
+body{margin:0;overflow:hidden;background:#020611;color:#0ff;font-family:monospace}
+
+#ui{position:absolute;top:10px;left:10px;width:280px}
+.panel{background:rgba(0,20,40,.8);padding:10px;border:1px solid #0ff;margin-bottom:10px}
+
+#log{
+position:absolute;bottom:0;left:0;right:0;height:160px;
+background:black;border-top:1px solid #0ff;
+overflow:auto;font-size:12px;padding:6px;
+}
+
+button,input{
+width:100%;margin-top:5px;padding:6px;
+background:#011;color:#0ff;border:1px solid #0ff
+}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+
+<div class="panel">
+<b>MISSION</b>
+<button onclick="startMission()">START AUTO MISSION</button>
+</div>
+
+<div class="panel">
+<b>SIM SPEED</b>
+<button onclick="speed=1">x1</button>
+<button onclick="speed=5">x5</button>
+<button onclick="speed=20">x20</button>
+</div>
+
+<div class="panel">
+<b>ZOOM</b>
+<button onclick="zoom(-0.3)">ZOOM IN</button>
+<button onclick="zoom(0.3)">ZOOM OUT</button>
+</div>
+
+<div class="panel">
+<div id="tele"></div>
+</div>
+
+</div>
+
+<div id="log"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+
+// ===== SCENE =====
+const scene=new THREE.Scene()
+
+const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.001,100)
+camera.position.set(0,-2.5,1.2)
+camera.lookAt(0,0,0)
+
+const renderer=new THREE.WebGLRenderer({antialias:true})
+renderer.setSize(innerWidth,innerHeight)
+document.body.appendChild(renderer.domElement)
+
+// ===== LIGHT =====
+scene.add(new THREE.AmbientLight(0x555555))
+const light=new THREE.DirectionalLight(0xffffff,1.2)
+light.position.set(3,3,3)
+scene.add(light)
+
+// ===== TEXTURES =====
+const loader=new THREE.TextureLoader()
+
+const earth=new THREE.Mesh(
+new THREE.SphereGeometry(0.12,64,64),
+new THREE.MeshPhongMaterial({
+map:loader.load("https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg")
+})
+)
+scene.add(earth)
+
+const moon=new THREE.Mesh(
+new THREE.SphereGeometry(0.04,32,32),
+new THREE.MeshPhongMaterial({
+map:loader.load("https://threejs.org/examples/textures/planets/moon_1024.jpg")
+})
+)
+scene.add(moon)
+
+// ===== SAT =====
+const sat=new THREE.Mesh(
+new THREE.SphereGeometry(0.01,16,16),
+new THREE.MeshBasicMaterial({color:0xffffff})
+)
+scene.add(sat)
+
+// ===== STATE =====
+let pos=new THREE.Vector2(0.12,0)
+let vel=new THREE.Vector2(0,0)
+let acc=new THREE.Vector2(0,0)
+
+let phase="IDLE"
+let t=0
+let speed=1
+
+// ===== LOG =====
+function log(m){
+let el=document.getElementById("log")
+el.innerHTML+="<br>> "+m
+el.scrollTop=el.scrollHeight
+}
+
+// ===== AUTOPILOT =====
+function autopilot(){
+
+let r=pos.length()
+
+if(phase==="LIFTOFF"){
+acc.set(pos.x,pos.y).normalize().multiplyScalar(0.8)
+
+if(r>0.16){
+phase="PITCH"
+log("Pitch maneuver")
+}
+}
+
+else if(phase==="PITCH"){
+let tangent=new THREE.Vector2(-pos.y,pos.x).normalize()
+acc.copy(tangent).multiplyScalar(0.6)
+
+if(r>0.22){
+phase="ASCENT"
+log("Gravity turn complete")
+}
+}
+
+else if(phase==="ASCENT"){
+let tangent=new THREE.Vector2(-pos.y,pos.x).normalize()
+acc.copy(tangent).multiplyScalar(0.4)
+
+if(r>0.28){
+phase="CIRCULARIZE"
+log("Preparing orbit insertion")
+}
+}
+
+else if(phase==="CIRCULARIZE"){
+let tangent=new THREE.Vector2(-pos.y,pos.x).normalize()
+acc.copy(tangent).multiplyScalar(0.2)
+
+let vReq=Math.sqrt(1/r)
+let v=vel.length()
+
+if(Math.abs(v-vReq)<0.02){
+phase="ORBIT"
+log("Stable orbit achieved")
+}
+}
+
+else if(phase==="ORBIT"){
+acc.set(0,0)
+}
+
+}
+
+// ===== PHYSICS =====
+function step(dt){
+
+// gravity
+let dx=-pos.x, dy=-pos.y
+let r=Math.hypot(dx,dy)+1e-5
+
+let grav=new THREE.Vector2(dx/(r*r*r),dy/(r*r*r))
+
+// autopilot thrust
+autopilot()
+
+let totalAcc=grav.add(acc)
+
+// integrate
+vel.add(totalAcc.multiplyScalar(dt))
+pos.add(vel.clone().multiplyScalar(dt))
+
+// collision Earth
+let dist=pos.length()
+if(dist<0.12){
+let n=pos.clone().normalize()
+pos.copy(n.multiplyScalar(0.12))
+vel.multiplyScalar(0.2)
+}
+
+// ===== TELEMETRY =====
+let v=vel.length()
+let alt=dist-0.12
+let vReq=Math.sqrt(1/dist)
+
+document.getElementById("tele").innerHTML=
+"Phase: "+phase+"<br>"+
+"Altitude: "+alt.toFixed(3)+"<br>"+
+"Velocity: "+v.toFixed(3)+"<br>"+
+"Req Orbit Vel: "+vReq.toFixed(3)+"<br>"+
+"Error: "+(Math.abs(v-vReq)).toFixed(3)
+}
+
+// ===== CONTROLS =====
+function startMission(){
+phase="LIFTOFF"
+vel.set(0,0)
+log("Mission start")
+}
+
+function zoom(z){
+camera.position.multiplyScalar(1+z)
+}
+
+// ===== LOOP =====
+function animate(){
+requestAnimationFrame(animate)
+
+for(let i=0;i<speed;i++){
+step(0.01)
+}
+
+sat.position.set(pos.x,pos.y,0)
+
+renderer.render(scene,camera)
+}
+
+animate()
+
+</script>
+</body>
+</html>
