@@ -1,0 +1,112 @@
+<script>
+
+// ===== STATE =====
+let phase="PRELAUNCH"
+let pos=new THREE.Vector2(earthR,0)
+let vel=new THREE.Vector2(0,0)
+
+let fuel=100
+let deltaV=9.5 // km/s aproximado
+let status="IDLE"
+
+// ===== HELPERS =====
+function applyThrust(direction, power){
+if(fuel<=0) return
+
+let thrust = direction.clone().multiplyScalar(power)
+vel.add(thrust)
+
+fuel -= power*0.5
+deltaV -= power*0.01
+}
+
+// ===== ORBIT TARGET =====
+const targetOrbit=0.35
+
+function orbitError(){
+return targetOrbit - pos.length()
+}
+
+// ===== PHYSICS =====
+function step(){
+
+// moon motion
+moonAngle+=0.002
+moon.position.set(Math.cos(moonAngle)*moonOrbit,Math.sin(moonAngle)*moonOrbit,0)
+
+// PRELAUNCH
+if(phase==="PRELAUNCH") return
+
+let radial=pos.clone().normalize()
+let tangent=new THREE.Vector2(-pos.y,pos.x).normalize()
+
+// ===== FALCON 9 PHASES =====
+
+if(phase==="LIFTOFF"){
+applyThrust(radial,0.002)
+status="ASCENT"
+}
+
+if(phase==="MAXQ"){
+applyThrust(radial,0.001)
+status="MAX-Q"
+}
+
+if(phase==="MECO"){
+status="COAST"
+}
+
+if(phase==="STAGE2"){
+applyThrust(tangent,0.002)
+status="SECOND STAGE"
+}
+
+if(phase==="ORBIT"){
+let err=orbitError()
+
+// corrección suave → clave del FIX
+applyThrust(tangent,0.0015)
+applyThrust(radial,err*0.002)
+
+status = Math.abs(err)<0.01 ? "STABLE" : "CORRECTING"
+}
+
+// ===== GRAVITY =====
+let dx=-pos.x, dy=-pos.y
+let d=Math.hypot(dx,dy)+1e-5
+vel.x+=dx/(d*d*d)*0.01
+vel.y+=dy/(d*d*d)*0.01
+
+// ===== UPDATE =====
+pos.x+=vel.x
+pos.y+=vel.y
+
+// ===== TELEMETRY =====
+let alt=(pos.length()-earthR)
+
+document.getElementById("tele").innerHTML=
+"Phase: "+phase+"<br>"+
+"Status: "+status+"<br>"+
+"Velocity: "+vel.length().toFixed(3)+" km/s<br>"+
+"Altitude: "+alt.toFixed(3)+"<br>"+
+"Orbit Error: "+orbitError().toFixed(4)+"<br>"+
+"Fuel: "+fuel.toFixed(1)+" %<br>"+
+"Delta-V: "+deltaV.toFixed(2)+" km/s"
+
+}
+
+// ===== SEQUENCE (REALISTA) =====
+function autoMission(){
+
+log("T-10: Launch sequence start")
+
+setTimeout(()=>{setPhase("LIFTOFF"); log("Liftoff!")},10000)
+setTimeout(()=>{setPhase("MAXQ"); log("Max-Q reached")},15000)
+setTimeout(()=>{setPhase("MECO"); log("MECO")},20000)
+setTimeout(()=>{log("Stage separation")},22000)
+setTimeout(()=>{setPhase("STAGE2"); log("Second stage ignition")},24000)
+setTimeout(()=>{setPhase("ORBIT"); log("Orbit insertion burn")},28000)
+
+}
+
+</script>
